@@ -1,9 +1,9 @@
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
 from states import Form
-import json
 from .age_and_city import ask_age
+import json
 
 router = Router()
 
@@ -16,55 +16,44 @@ async def load_profile(user_id):
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-# Функция для сохранения данных
-def save_profile(user_id, data):
-    try:
-        with open("user_profiles.json", "r", encoding="utf-8") as file:
-            profiles = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        profiles = {}
+# Запрос фото
+async def ask_photo(message: types.Message, state: FSMContext):
+    await message.answer("Теперь отправь свою фотографию:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(Form.photo)
 
-    profiles[str(user_id)] = data
+# Обработка фото и показ анкеты
+@router.message(Form.photo, F.content_type == "photo")
+async def process_photo(message: types.Message, state: FSMContext):
+    photo = message.photo[-1].file_id
+    await state.update_data(photo=photo)
+    data = await state.get_data()
 
-    with open("user_profiles.json", "w", encoding="utf-8") as file:
-        json.dump(profiles, file, ensure_ascii=False, indent=4)
+    # Загружаем данные из файла
+    user_data = await load_profile(message.from_user.id)
+    name = data.get('name', user_data.get('name', 'Имя не указано'))
+    age = data.get('age', user_data.get('age', 'Возраст не указан'))
+    city = data.get('city', user_data.get('city', 'Город не указан'))
+    description = data.get('description', user_data.get('description', ''))
 
-# Приветствие с кнопкой "Создать анкету"
-@router.message(F.text == "/start")
-async def welcome_message(message: types.Message):
+    # Формирование текста анкеты
+    profile_text = f"{name}, {age}, {city}"
+    if description:
+        profile_text += f" - {description}"
+
+    # Сообщение перед показом анкеты с кнопкой "Готово"
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Создать анкету")]],
-        resize_keyboard=True,
-        one_time_keyboard=True
+        keyboard=[[KeyboardButton(text="Готово!")]], resize_keyboard=True
     )
-    await message.answer("Привет! Давай создадим твою анкету.", reply_markup=keyboard)
 
-# Старт анкеты — запрос имени
-@router.message(F.text == "Создать анкету")
-async def start_profile(message: types.Message, state: FSMContext):
-    user_data = await load_profile(message.from_user.id)
-    name = user_data.get("name")
+    await message.answer("Вот так будет выглядеть твоя анкета. Готово?", reply_markup=keyboard)
 
-    # Если имя уже сохранено — предлагаем его кнопкой
-    if name:
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=f"{name}")]],
-            resize_keyboard=True
-        )
-        await message.answer("Давайте начнём с имени! Введи своё имя:", reply_markup=keyboard)
-    else:
-        await message.answer("Давайте начнём с имени! Введи своё имя:", reply_markup=ReplyKeyboardRemove())
-    
-    await state.set_state(Form.name)
+    # Отправляем фото с анкетой
+    await message.bot.send_photo(chat_id=message.chat.id, photo=photo, caption=profile_text)
 
-# Обработка имени
-@router.message(Form.name)
-async def process_name(message: types.Message, state: FSMContext):
-    user_data = await load_profile(message.from_user.id)
+    # Очищаем состояние
+    await state.clear()
 
-    # Сохраняем имя
-    user_data["name"] = message.text
-    save_profile(user_id=message.from_user.id, data=user_data)
-
-    # Переход к возрасту
-    await ask_age(message, state)
+# Обработчик кнопки "Готово!"
+@router.message(F.text == "Готово!")
+async def finish_profile(message: types.Message):
+    await message.answer("Анкета успешно создана!", reply_markup=ReplyKeyboardRemove())
