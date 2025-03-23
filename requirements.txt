@@ -2,4 +2,5 @@ aiogram
 requests
 python-dotenv
 geopy
+cities
 
