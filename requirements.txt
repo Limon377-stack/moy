@@ -1,2 +1,2 @@
-Build Command: pip install -r requirements.txt
-Start Command: python bot.py
+aiogram==3.0.0
+python-dotenv==1.0.0
